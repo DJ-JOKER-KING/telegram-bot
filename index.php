@@ -1,3 +1,5 @@
+<?php
+echo "Railway PHP OK";
 <!DOCTYPE html>
 <html lang="en">
 <head>
