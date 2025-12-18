@@ -14,6 +14,10 @@ if (!isset($update["message"])) { echo "OK"; exit; }
 $chat_id = $update["message"]["chat"]["id"];
 $text = trim($update["message"]["text"] ?? "");
 
+/* ===== DEVICE ID ===== */
+$userAgent = $_SERVER["HTTP_USER_AGENT"] ?? "unknown";
+$device_id = md5($chat_id . $userAgent);
+
 function saveUsers($data, $file){
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
 }
@@ -25,18 +29,32 @@ function sendMessage($chat_id, $text){
     ]));
 }
 
-/* ===== AUTO EXPIRE CHECK ===== */
+/* ===== AUTO EXPIRE ===== */
 if (isset($users[$chat_id]["expire"]) && time() > $users[$chat_id]["expire"]) {
     unset($users[$chat_id]);
     saveUsers($users, $usersFile);
-    sendMessage($chat_id, "⏳ Your VIP has expired");
+    sendMessage($chat_id, "⏳ Your VIP expired");
     exit;
 }
 
 /* ===== /start ===== */
 if ($text === "/start") {
-    if (isset($users[$chat_id]["approved"]) && $users[$chat_id]["approved"] === true) {
-        sendMessage($chat_id, "👑 VIP Active\nExpires: ".date("d M Y", $users[$chat_id]["expire"]));
+
+    if (isset($users[$chat_id]) && $users[$chat_id]["approved"] === true) {
+
+        // DEVICE CHECK
+        if (!isset($users[$chat_id]["device"])) {
+            $users[$chat_id]["device"] = $device_id;
+            saveUsers($users, $usersFile);
+        } elseif ($users[$chat_id]["device"] !== $device_id) {
+            sendMessage($chat_id, "🚫 Device changed!\nContact admin");
+            exit;
+        }
+
+        sendMessage(
+            $chat_id,
+            "👑 VIP Active\nExpires: ".date("d M Y", $users[$chat_id]["expire"])
+        );
         exit;
     }
 
@@ -47,7 +65,7 @@ if ($text === "/start") {
 
     sendMessage(
         $ADMIN_ID,
-        "🔔 New Request\nUser ID: $chat_id\n\nApprove:\n/approve $chat_id DAYS\nExample:\n/approve $chat_id 7"
+        "🔔 New Request\nUser ID: $chat_id\n\nApprove:\n/approve $chat_id DAYS"
     );
     exit;
 }
@@ -55,7 +73,7 @@ if ($text === "/start") {
 /* ===== ADMIN ===== */
 if ((string)$chat_id === (string)$ADMIN_ID) {
 
-    // /approve ID DAYS
+    // APPROVE ID DAYS
     if (strpos($text, "/approve") === 0) {
         $p = explode(" ", $text);
         $id = $p[1] ?? null;
@@ -64,26 +82,27 @@ if ((string)$chat_id === (string)$ADMIN_ID) {
         if ($id && $days > 0) {
             $users[$id] = [
                 "approved" => true,
-                "expire" => time() + ($days * 86400)
+                "expire" => time() + ($days * 86400),
+                "device" => null
             ];
             saveUsers($users, $usersFile);
 
-            sendMessage($id, "✅ VIP Approved\n⏳ Valid for $days days");
-            sendMessage($ADMIN_ID, "✔ Approved for $days days");
+            sendMessage($id, "✅ VIP Approved\nValid $days days");
+            sendMessage($ADMIN_ID, "✔ Approved");
         } else {
-            sendMessage($ADMIN_ID, "❌ Format:\n/approve USER_ID DAYS");
+            sendMessage($ADMIN_ID, "❌ Use:\n/approve USER_ID DAYS");
         }
         exit;
     }
 
-    // /reject
-    if (strpos($text, "/reject") === 0) {
+    // RESET DEVICE
+    if (strpos($text, "/resetdevice") === 0) {
         $id = explode(" ", $text)[1] ?? null;
         if ($id && isset($users[$id])) {
-            unset($users[$id]);
+            $users[$id]["device"] = null;
             saveUsers($users, $usersFile);
-            sendMessage($id, "❌ Request rejected");
-            sendMessage($ADMIN_ID, "✖ User rejected");
+            sendMessage($ADMIN_ID, "🔓 Device reset done");
+            sendMessage($id, "🔄 Device reset\nLogin again");
         }
         exit;
     }
@@ -95,5 +114,5 @@ if (!isset($users[$chat_id]) || $users[$chat_id]["approved"] !== true) {
     exit;
 }
 
-/* ===== VIP USER ===== */
-sendMessage($chat_id, "👑 VIP Active\nExpires: ".date("d M Y", $users[$chat_id]["expire"]));
+/* ===== VIP ===== */
+sendMessage($chat_id, "👑 VIP Access OK");
