@@ -1,101 +1,99 @@
 <?php
-// ===== CONFIG =====
-$BOT_TOKEN = getenv("BOT_TOKEN");   // Railway Variable
-$ADMIN_ID  = getenv("ADMIN_ID");    // Your Telegram ID
+$BOT_TOKEN = getenv("BOT_TOKEN");
+$ADMIN_ID  = getenv("ADMIN_ID");
 $API = "https://api.telegram.org/bot$BOT_TOKEN";
 
-// ===== DATABASE FILE =====
 $usersFile = __DIR__ . "/users.json";
 $users = file_exists($usersFile)
     ? json_decode(file_get_contents($usersFile), true)
     : [];
 
-// ===== GET UPDATE =====
 $update = json_decode(file_get_contents("php://input"), true);
-if (!isset($update["message"])) {
-    echo "OK";
-    exit;
-}
+if (!isset($update["message"])) { echo "OK"; exit; }
 
 $chat_id = $update["message"]["chat"]["id"];
 $text = trim($update["message"]["text"] ?? "");
 
-// ===== FUNCTIONS =====
-function saveUsers($data, $file) {
+function saveUsers($data, $file){
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
 }
-
-function sendMessage($chat_id, $text) {
+function sendMessage($chat_id, $text){
     global $API;
-    file_get_contents($API . "/sendMessage?" . http_build_query([
-        "chat_id" => $chat_id,
-        "text" => $text
+    file_get_contents($API."/sendMessage?".http_build_query([
+        "chat_id"=>$chat_id,
+        "text"=>$text
     ]));
 }
 
-// ===== /start COMMAND =====
-if ($text === "/start") {
+/* ===== AUTO EXPIRE CHECK ===== */
+if (isset($users[$chat_id]["expire"]) && time() > $users[$chat_id]["expire"]) {
+    unset($users[$chat_id]);
+    saveUsers($users, $usersFile);
+    sendMessage($chat_id, "⏳ Your VIP has expired");
+    exit;
+}
 
-    if (isset($users[$chat_id]) && $users[$chat_id]["approved"] === true) {
-        sendMessage($chat_id, "✅ You are already approved\n👑 Welcome VIP");
+/* ===== /start ===== */
+if ($text === "/start") {
+    if (isset($users[$chat_id]["approved"]) && $users[$chat_id]["approved"] === true) {
+        sendMessage($chat_id, "👑 VIP Active\nExpires: ".date("d M Y", $users[$chat_id]["expire"]));
         exit;
     }
 
-    // New or pending user
-    $users[$chat_id] = [
-        "approved" => false,
-        "time" => time()
-    ];
+    $users[$chat_id] = ["approved"=>false];
     saveUsers($users, $usersFile);
 
-    sendMessage($chat_id, "⏳ Your request is pending admin approval");
+    sendMessage($chat_id, "⏳ Waiting for admin approval");
 
     sendMessage(
         $ADMIN_ID,
-        "🔔 New Approval Request\n\nUser ID: $chat_id\n\nApprove:\n/approve $chat_id\nReject:\n/reject $chat_id"
+        "🔔 New Request\nUser ID: $chat_id\n\nApprove:\n/approve $chat_id DAYS\nExample:\n/approve $chat_id 7"
     );
     exit;
 }
 
-// ===== ADMIN COMMANDS =====
+/* ===== ADMIN ===== */
 if ((string)$chat_id === (string)$ADMIN_ID) {
 
-    // APPROVE
+    // /approve ID DAYS
     if (strpos($text, "/approve") === 0) {
-        $id = trim(explode(" ", $text)[1] ?? "");
-        if ($id && isset($users[$id])) {
-            $users[$id]["approved"] = true;
+        $p = explode(" ", $text);
+        $id = $p[1] ?? null;
+        $days = $p[2] ?? 0;
+
+        if ($id && $days > 0) {
+            $users[$id] = [
+                "approved" => true,
+                "expire" => time() + ($days * 86400)
+            ];
             saveUsers($users, $usersFile);
 
-            sendMessage($id, "✅ Approved!\n👑 You are now VIP");
-            sendMessage($ADMIN_ID, "✔ User $id Approved");
+            sendMessage($id, "✅ VIP Approved\n⏳ Valid for $days days");
+            sendMessage($ADMIN_ID, "✔ Approved for $days days");
         } else {
-            sendMessage($ADMIN_ID, "❌ User not found");
+            sendMessage($ADMIN_ID, "❌ Format:\n/approve USER_ID DAYS");
         }
         exit;
     }
 
-    // REJECT
+    // /reject
     if (strpos($text, "/reject") === 0) {
-        $id = trim(explode(" ", $text)[1] ?? "");
+        $id = explode(" ", $text)[1] ?? null;
         if ($id && isset($users[$id])) {
             unset($users[$id]);
             saveUsers($users, $usersFile);
-
-            sendMessage($id, "❌ Your access request was rejected");
-            sendMessage($ADMIN_ID, "✖ User $id Rejected");
-        } else {
-            sendMessage($ADMIN_ID, "❌ User not found");
+            sendMessage($id, "❌ Request rejected");
+            sendMessage($ADMIN_ID, "✖ User rejected");
         }
         exit;
     }
 }
 
-// ===== BLOCK UNAPPROVED USERS =====
+/* ===== BLOCK ===== */
 if (!isset($users[$chat_id]) || $users[$chat_id]["approved"] !== true) {
-    sendMessage($chat_id, "⛔ You are not approved yet");
+    sendMessage($chat_id, "⛔ Not approved");
     exit;
 }
 
-// ===== APPROVED USER RESPONSE =====
-sendMessage($chat_id, "👑 VIP Access Granted\nUse bot commands now");
+/* ===== VIP USER ===== */
+sendMessage($chat_id, "👑 VIP Active\nExpires: ".date("d M Y", $users[$chat_id]["expire"]));
